@@ -23,7 +23,11 @@ const express = require('express'),
     { Loggly } = require('winston-loggly-bulk'),
     keys = require('./config/keys'),
     loggly = require('./controllers/logger').loggly,
-    logline = require('./controllers/logger').logline
+    logline = require('./controllers/logger').logline,
+    CustomError = require('./messages/errors').CustomError,
+    genError = require('./messages/errors').genErrors,
+    CustomSuccess = require('./messages/messages').CustomSuccess,
+    genSuccess = require('./messages/messages').genSuccess;
 
 
 // AUXILIARY FUNCS
@@ -279,27 +283,30 @@ async function verifyJWT(req, res, next) {
 
         // JWT and UID validation
         if (!token || typeof token != 'string') {
-            api.invalidToken()
-            return
+            throw genError.invalid_token;
         }
         if (!apiHandler.checkMongoID(uid)) {
-            api.invalidUID()
-            return
+            throw genError.invalid_uid;
         }
 
 
         // Logic
         let user = await User.findById(uid, 'secret is_loggedin').lean().cache(0, `userauth-${uid}`)
-        if (!user) { api.nosuchuser(); return }
-        if (!user.is_loggedin) { api.userNotLoggedIn(); return }
+        if (!user) { 
+            throw genError.no_such_user;
+        }
+        if (!user.is_loggedin) { 
+            throw genError.user_not_loggedin;
+        }
         const key = user.secret
-        if (key == null) { api.invalidToken(); return }
+        if (key == null) {
+            throw genError.invalid_token;
+        }
 
         // TODO set maxAge on token
         jwt.verify(token, key, { algorithms: ['HS256'] }, (err, payload) => {
             if (err) {
-                api.invalidToken()
-                return
+                throw genError.invalid_token;
             } else {
                 req.uid = uid
                 req.jwt_data = payload
@@ -342,7 +349,7 @@ app.post('/api/requestemailcode', validators.requestemailcode, async (req, res) 
 
             // Send code by email
             await sendEmailCode(code, email)
-            api.success("Email enviado")
+            api.success(new CustomSuccess('Email sent', 2001))
 
         } else { // New user
             // Make new temp user
@@ -357,7 +364,7 @@ app.post('/api/requestemailcode', validators.requestemailcode, async (req, res) 
 
             // Send code by email
             await sendEmailCode(code, email)
-            api.success("Email enviado")
+            api.success(new CustomSuccess('Email sent', 2001))
         }
 
         function sendEmailCode(code, email) {
@@ -382,23 +389,23 @@ app.post('/api/verifyemailcode', validators.verifyemailcode, async (req, res) =>
 
         // Logic
         let user = await User.findOne({ email: email }, 'email email_verification')
-        if (!user) { api.nosuchuser(); return }
-        if (user.email_verification.code == 0) throw 'Não tens código de verificação ativo - pede um primeiro'
+        if (!user) { throw genError.no_such_user }
+        if (user.email_verification.code == 0) throw new CustomError('No active email validation code', 4006)
 
         if (codeIsExpired(user.toObject())) {
             user.email_verification.code = 0;
             user.save();
-            throw 'Código expirado - pede outro'
+            throw new CustomError('Email validation code expired', 4007)
         }
         if (user.email_verification.code != code) {
             user.email_verification.number_of_attempts++;
             if (user.email_verification.number_of_attempts > 2) {
                 user.email_verification.code = 0;
                 user.save()
-                throw 'Código invalidado por 3 tentativas incorretas'
+                throw new CustomError('Code revoked after 3 incorrect tries', 4008)
             } else {
                 user.save()
-                throw `Código incorrecto - tens mais ${3 - user.email_verification.number_of_attempts} tentativas`
+                throw new CustomError('Code incorrect, you have more $$ tries', 4009, 3 - user.email_verification.number_of_attempts)
             }
 
         }
@@ -423,7 +430,7 @@ app.post('/api/verifyemailcode', validators.verifyemailcode, async (req, res) =>
                 is_complete: true,
                 uid: user.id, // Asign user id from mongo, used for the rest of the API instead of email
                 secret_2, // New shared secret
-            }, `Bem vindo de volta ${user.email}`)
+            }, new CustomSuccess('Welcome back $$', 2002, user.email))
             return
         } else {
             // New user, make firebase account and return token
@@ -431,21 +438,10 @@ app.post('/api/verifyemailcode', validators.verifyemailcode, async (req, res) =>
                 is_complete: false,
                 uid: user.id,
                 secret_2
-            }, `Bem vindo à Novacar ${user.email}`)
+            }, new CustomSuccess('Welcome to Novacar $$', 2003, user.email))
             return
         }
 
-        function makeFirebaseUser(user) {
-            return fbAdmin.auth().createUser({
-                uid: user.id,
-                email: user.email,
-                emailVerified: true
-            })
-        }
-
-        function makeFirebaseToken(uid) {
-            return fbAdmin.auth().createCustomToken(uid) // 1hr token but permanent in device
-        }
 
         function codeIsExpired(user) {
             const now = moment();
@@ -481,10 +477,9 @@ app.post('/api/user/:uid/signup', validators.signup, verifyJWT, async (req, res)
 
         // If user has already completed signup, reject this
         if (user.is_complete) {
-            throw 'Utilizador já tem conta criada'
+            throw new CustomError('This user already has an account', 4010)
         }
 
-        // Check if avatar_url is from firebase TODO
         // Get user device data TODO
 
         // Update user
@@ -495,7 +490,7 @@ app.post('/api/user/:uid/signup', validators.signup, verifyJWT, async (req, res)
         await user.save()
 
 
-        api.success("Bem vindo à novacar")
+        api.success(new CustomSuccess('Welcome to Novacar $$', 2003, user.name))
     } catch (error) {
         api.error(error)
     }
@@ -526,7 +521,7 @@ app.post('/api/user/:uid/updateaccount', validators.updateaccount, verifyJWT, as
             user.phone_number = phone_number
         }
         await user.save()
-        api.success("Conta atualizada")
+        api.success(new CustomSuccess('Profile updated', 2004))
 
     } catch (error) {
         api.error(error)
@@ -553,7 +548,7 @@ app.post('/api/user/:uid/logout', verifyJWT, async (req, res) => {
         // Clear userauth-${uid} from cachegoose
         cachegoose.clearCache(`userauth-${uid}`);
 
-        api.success('Sessão terminada')
+        api.success(new CustomSuccess('Session terminated', 2005))
 
     } catch (error) {
         api.error(error)
@@ -589,7 +584,7 @@ app.post('/api/user/:uid/avatar', verifyJWT, upload.single('file'), async (req, 
                     }
                 })
             } else {
-                throw 'Upload falhou'
+                throw genError.upload_failed;
             }
         }
 
@@ -599,10 +594,10 @@ app.post('/api/user/:uid/avatar', verifyJWT, upload.single('file'), async (req, 
         // Save to user profile
         const saved = await User.findByIdAndUpdate(req.uid, { avatar_url: urls })
 
-        api.respond({ avatar_urls: urls }, 'Upload completo')
+        api.respond({ avatar_urls: urls }, genSuccess.upload_success )
 
     } catch (error) {
-        api.error(error, error, 5001)
+        api.error(error)
     }
 })
 
@@ -646,7 +641,6 @@ app.post('/test/user/:uid/verifytoken', verifyJWT, async (req, res) => {
         api.error(error)
     }
 })
-
 app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => {
     const api = req.api
     try {
@@ -656,19 +650,19 @@ app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => 
         // Get body data
 
         // Custom error
-        if (1) {
+        if (0) {
             console.log("Custom error")
             const user = await User.findOne({ email: 'noemail' })
             if (user) {
 
             } else {
-                api.nosuchuser()
+                throw genError.no_such_user
                 return
             }
         }
 
         // Server error
-        if (0) {
+        if (1) {
             JSON.parse(nothing)
         }
 
@@ -692,51 +686,6 @@ app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => 
 
 
 
-
-// API ERROR HANDLING
-if (0) {
-    app.post('/test/errorhandling', [check('email').isEmail()], async (req, res, next) => {
-        const api = new apiHandler(req, res)
-        try {
-            // Validation error
-            if (api.checkValidation()) return
-
-            // Get body data
-
-            // Custom error
-            if (0) {
-                console.log("Custom error")
-                const user = await User.findOne({ email: 'noemail' })
-                if (user) {
-
-                } else {
-                    throw 'No user found'
-                }
-            }
-
-            // Server error
-            if (0) {
-                JSON.parse(nothing)
-            }
-
-            // Success
-            if (0) {
-                api.success('Did something well today')
-            }
-
-            // Respond with data
-            if (1) {
-                api.respond({
-                    apples: 10,
-                    email: 'manuel@gmail.com',
-                    colors: ['red', 'cyan', 'yellow']
-                }, 'got apples successfully')
-            }
-        } catch (error) {
-            api.error(error)
-        }
-    })
-}
 // API MODEL
 if (0) {
     app.post('', [], async (req, res) => {
