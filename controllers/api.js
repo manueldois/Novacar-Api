@@ -5,7 +5,7 @@ const debugAPI = require('debug')('api'),
     sharp = require('sharp'),
     fs = require('fs'),
     loggly = require('./logger').loggly,
-    CustomError = require('../messages/errors').CustomError
+    CError = require('../messages/error').CustomError
 
 
 // NO CACHE ON SHARP
@@ -43,11 +43,11 @@ class apiHandler {
         console.log(`\n ---------------- ${reqlog.method} ${reqlog.path} UID: ${this.req.params.uid} ----------------`)
         console.log('REQUEST: ', this.req.body)
     }
-    logLogglySuccess(reqlog, reslog, exectime_ms) {
-        loggly.info('API response', { request: reqlog, response: reslog, exectime_ms: exectime_ms, logs: this.logs })
+    logLogglySuccess(reqlog, reslog) {
+        loggly.info('API response', { request: reqlog, response: reslog, exectime_ms: this.getExecms(), logs: this.logs })
     }
-    logLogglyError(reqlog, errorlog, exectime_ms) {
-        loggly.error('API error', { request: reqlog, error: errorlog, exectime_ms: exectime_ms, logs: this.logs })
+    logLogglyError(reqlog, errorlog) {
+        loggly.error('API error', { request: reqlog, error: errorlog, exectime_ms: this.getExecms(), logs: this.logs })
     }
     log(message, arg) {
         console.log(message, arg) // Log to console right away
@@ -76,6 +76,8 @@ class apiHandler {
         const result = validationResult(this.req);
         if (!result.isEmpty()) {
             let errors = result.array()
+            // Push them all into logs
+            this.logs.push({errors: errors})
             // Pick the first and send to frontend
             let first_error = errors[0]
             this.error(first_error.msg)
@@ -86,6 +88,8 @@ class apiHandler {
         }
     }
 
+
+    // Three methods of closure - error (send to frontend if it's custom error), success (just an ok with possible response for frontend), respond (send data and optional message)
 
     error(error) {
         console.log("API error: ", error)
@@ -98,44 +102,30 @@ class apiHandler {
             error: error,
             req_id: this.req_id
         }
+
         if (error instanceof Error) {
             // Is internal error
             response = {
                 success: false,
                 isError: true,
+                error: {
+                    message: 'internal server error',
+                    code: '5000'
+                },
                 type: 'internal error',
-                code: '5000',
-                message: 'internal server error',
                 req_id: this.req_id
             }
             this.res.status(500).json(response)
             errorLog.type = 'internal error'
         }
 
-        if (error instanceof CustomError) {
+        if (error instanceof CError) {
             // Is custom error
             response = {
                 success: false,
                 isError: true,
                 type: 'custom error',
-                code: error.code,
-                data: error.data,
-                message: error.message,
-                req_id: this.req_id
-            }
-            errorLog.type = 'custom error'
-            this.res.status(400).json(response)
-        }
-
-        if (typeof error == 'string') {
-            // For simple one-time errors
-            response = {
-                success: false,
-                isError: true,
-                type: 'custom error',
-                code: 400,
-                data: error.data,
-                message: error,
+                error,
                 req_id: this.req_id
             }
             errorLog.type = 'custom error'
@@ -144,49 +134,50 @@ class apiHandler {
 
         // Log to logly
         let reqlog = this.getReqLog();
-        this.logLogglyError(reqlog, errorLog, this.getExecms())
+        this.logLogglyError(reqlog, errorLog)
     }
 
-    respond(data, message = null) {
+    success(response = null) {
+        let reqlog = this.getReqLog()
+        let reslog = {
+            type: 'success',
+            success: true,
+            isError: false,
+            response,
+            req_id: this.req_id
+        }
+        console.log(`SUCCESS: `, response)
+        this.logLogglySuccess(reqlog, reslog)
+
+        this.res.status(200).json({
+            type: 'success',
+            success: true,
+            response,
+            req_id: this.req_id
+        })
+    }
+
+    respond(data, response = null) {
         let reqlog = this.getReqLog()
         let reslog = {
             type: 'response',
             success: true,
             data: data,
-            message
+            response
         }
-        this.logLogglySuccess(reqlog, reslog, this.getExecms())
-        console.log(`RESPONSE: `, data, message)
+        this.logLogglySuccess(reqlog, reslog)
+        console.log(`RESPONSE: `, data, response)
 
         this.res.status(200).json({
             type: 'response',
             success: true,
-            message,
+            response,
             data,
             req_id: this.req_id
         })
     }
 
-    success(success) {
-        let reqlog = this.getReqLog()
-        let reslog = {
-            type: 'success',
-            success: success,
-            isError: false,
-            req_id: this.req_id
-        }
-        console.log(`SUCCESS: `, success)
-        this.logLogglySuccess(reqlog, reslog, this.getExecms())
 
-        this.res.status(200).json({
-            type: 'success',
-            success: true,
-            message: success.message,
-            data: success.data,
-            code: success.code,
-            req_id: this.req_id
-        })
-    }
 }
 
 module.exports.apiHandler = apiHandler

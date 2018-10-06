@@ -24,13 +24,13 @@ const express = require('express'),
     keys = require('./config/keys'),
     loggly = require('./controllers/logger').loggly,
     logline = require('./controllers/logger').logline,
-    CustomError = require('./messages/errors').CustomError,
-    genError = require('./messages/errors').genErrors,
-    CustomSuccess = require('./messages/messages').CustomSuccess,
-    genSuccess = require('./messages/messages').genSuccess;
+    CError = require('./messages/error').CustomError,
+    genError = require('./messages/error').genErrors,
+    CSuccess = require('./messages/success').CustomSuccess,
+    genSuccess = require('./messages/success').genSuccess;
 
 
-// AUXILIARY FUNCS
+// AUXILIARY FUNCS 
 const auxfuncs = require('./controllers/auxiliary_funcs')
 const apiHandler = require('./controllers/api.js')
 
@@ -283,30 +283,30 @@ async function verifyJWT(req, res, next) {
 
         // JWT and UID validation
         if (!token || typeof token != 'string') {
-            throw genError.invalid_token;
+            throw new CError(4003);
         }
         if (!apiHandler.checkMongoID(uid)) {
-            throw genError.invalid_uid;
+            throw new CError(4004);
         }
 
 
         // Logic
         let user = await User.findById(uid, 'secret is_loggedin').lean().cache(0, `userauth-${uid}`)
         if (!user) { 
-            throw genError.no_such_user;
+            throw new CError(4001);
         }
         if (!user.is_loggedin) { 
-            throw genError.user_not_loggedin;
+            throw new CError(4006);
         }
         const key = user.secret
         if (key == null) {
-            throw genError.invalid_token;
+            throw new CError(4003);
         }
 
         // TODO set maxAge on token
         jwt.verify(token, key, { algorithms: ['HS256'] }, (err, payload) => {
             if (err) {
-                throw genError.invalid_token;
+                throw new CError(4003);
             } else {
                 req.uid = uid
                 req.jwt_data = payload
@@ -349,7 +349,7 @@ app.post('/api/requestemailcode', validators.requestemailcode, async (req, res) 
 
             // Send code by email
             await sendEmailCode(code, email)
-            api.success(new CustomSuccess('Email sent', 2001))
+            api.success(new CSuccess(2001))
 
         } else { // New user
             // Make new temp user
@@ -364,7 +364,7 @@ app.post('/api/requestemailcode', validators.requestemailcode, async (req, res) 
 
             // Send code by email
             await sendEmailCode(code, email)
-            api.success(new CustomSuccess('Email sent', 2001))
+            api.success(new CSuccess(2001))
         }
 
         function sendEmailCode(code, email) {
@@ -389,23 +389,23 @@ app.post('/api/verifyemailcode', validators.verifyemailcode, async (req, res) =>
 
         // Logic
         let user = await User.findOne({ email: email }, 'email email_verification')
-        if (!user) { throw genError.no_such_user }
-        if (user.email_verification.code == 0) throw new CustomError('No active email validation code', 4006)
+        if (!user) { throw new CError(4001) }
+        if (user.email_verification.code == 0) throw new CError(4006)
 
         if (codeIsExpired(user.toObject())) {
             user.email_verification.code = 0;
             user.save();
-            throw new CustomError('Email validation code expired', 4007)
+            throw new CError(4007)
         }
         if (user.email_verification.code != code) {
             user.email_verification.number_of_attempts++;
             if (user.email_verification.number_of_attempts > 2) {
                 user.email_verification.code = 0;
                 user.save()
-                throw new CustomError('Code revoked after 3 incorrect tries', 4008)
+                throw new CError(4008)
             } else {
                 user.save()
-                throw new CustomError('Code incorrect, you have more $$ tries', 4009, 3 - user.email_verification.number_of_attempts)
+                throw new CError(4009, 3 - user.email_verification.number_of_attempts)
             }
 
         }
@@ -430,7 +430,7 @@ app.post('/api/verifyemailcode', validators.verifyemailcode, async (req, res) =>
                 is_complete: true,
                 uid: user.id, // Asign user id from mongo, used for the rest of the API instead of email
                 secret_2, // New shared secret
-            }, new CustomSuccess('Welcome back $$', 2002, user.email))
+            }, new CSuccess(2002, user.email))
             return
         } else {
             // New user, make firebase account and return token
@@ -438,7 +438,7 @@ app.post('/api/verifyemailcode', validators.verifyemailcode, async (req, res) =>
                 is_complete: false,
                 uid: user.id,
                 secret_2
-            }, new CustomSuccess('Welcome to Novacar $$', 2003, user.email))
+            }, new CSuccess(2003, user.email))
             return
         }
 
@@ -477,7 +477,7 @@ app.post('/api/user/:uid/signup', validators.signup, verifyJWT, async (req, res)
 
         // If user has already completed signup, reject this
         if (user.is_complete) {
-            throw new CustomError('This user already has an account', 4010)
+            throw new CError(4010)
         }
 
         // Get user device data TODO
@@ -490,7 +490,7 @@ app.post('/api/user/:uid/signup', validators.signup, verifyJWT, async (req, res)
         await user.save()
 
 
-        api.success(new CustomSuccess('Welcome to Novacar $$', 2003, user.name))
+        api.success(new CSuccess(2003, user.name))
     } catch (error) {
         api.error(error)
     }
@@ -521,7 +521,7 @@ app.post('/api/user/:uid/updateaccount', validators.updateaccount, verifyJWT, as
             user.phone_number = phone_number
         }
         await user.save()
-        api.success(new CustomSuccess('Profile updated', 2004))
+        api.success(new CSuccess(2004))
 
     } catch (error) {
         api.error(error)
@@ -548,7 +548,7 @@ app.post('/api/user/:uid/logout', verifyJWT, async (req, res) => {
         // Clear userauth-${uid} from cachegoose
         cachegoose.clearCache(`userauth-${uid}`);
 
-        api.success(new CustomSuccess('Session terminated', 2005))
+        api.success(new CSuccess(2005))
 
     } catch (error) {
         api.error(error)
@@ -584,7 +584,7 @@ app.post('/api/user/:uid/avatar', verifyJWT, upload.single('file'), async (req, 
                     }
                 })
             } else {
-                throw genError.upload_failed;
+                throw new CError(4011);
             }
         }
 
@@ -594,7 +594,7 @@ app.post('/api/user/:uid/avatar', verifyJWT, upload.single('file'), async (req, 
         // Save to user profile
         const saved = await User.findByIdAndUpdate(req.uid, { avatar_url: urls })
 
-        api.respond({ avatar_urls: urls }, genSuccess.upload_success )
+        api.respond({ avatar_urls: urls }, new CSuccess(2006) )
 
     } catch (error) {
         api.error(error)
@@ -656,23 +656,23 @@ app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => 
             if (user) {
 
             } else {
-                throw genError.no_such_user
+                throw new CError(4001)
                 return
             }
         }
 
         // Server error
-        if (1) {
+        if (0) {
             JSON.parse(nothing)
         }
 
         // Success
         if (0) {
-            api.success('Did something well today')
+            api.success(new CSuccess('Did something well', 2000))
         }
 
         // Respond with data
-        if (0) {
+        if (1) {
             api.respond({
                 apples: 10,
                 email: 'manuel@gmail.com',
