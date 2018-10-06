@@ -20,14 +20,11 @@ const express = require('express'),
     cachegoose = require('cachegoose'),
     OneSignal = require('onesignal-node'),
     winston = require('winston'),
-    { Loggly } = require('winston-loggly-bulk'),
     keys = require('./config/keys'),
+    { Loggly } = require('winston-loggly-bulk'),
     loggly = require('./controllers/logger').loggly,
-    logline = require('./controllers/logger').logline,
     CError = require('./messages/error').CustomError,
-    genError = require('./messages/error').genErrors,
-    CSuccess = require('./messages/success').CustomSuccess,
-    genSuccess = require('./messages/success').genSuccess;
+    CSuccess = require('./messages/success').CustomSuccess;
 
 
 // AUXILIARY FUNCS 
@@ -324,8 +321,6 @@ async function verifyJWT(req, res, next) {
 
 
 // ROUTES
-
-
 app.post('/api/requestemailcode', validators.requestemailcode, async (req, res) => {
     const api = req.api
     try {
@@ -641,7 +636,7 @@ app.post('/test/user/:uid/verifytoken', verifyJWT, async (req, res) => {
         api.error(error)
     }
 })
-app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => {
+app.post('/test', check('email').isEmail(), async (req, res) => {
     const api = req.api
     try {
         // Validation error
@@ -668,7 +663,7 @@ app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => 
 
         // Success
         if (0) {
-            api.success(new CSuccess('Did something well', 2000))
+            api.success(new CSuccess(2000))
         }
 
         // Respond with data
@@ -677,7 +672,7 @@ app.post('/test/user/:uid/error', check('email').isEmail(), async (req, res) => 
                 apples: 10,
                 email: 'manuel@gmail.com',
                 colors: ['red', 'cyan', 'yellow']
-            }, 'got apples successfully')
+            }, new CSuccess(2000))
         }
     } catch (error) {
         api.error(error)

@@ -5,7 +5,7 @@ module.exports = {
         app: { appAuthKey: 'NzI0MWIwYzktY2RhZS00M2I0LTg0YjMtOGNkMjA2YjNjOWZk', appId: '423b7e87-49b2-4505-ad6c-94f3fe52437c' }
     },
     loggly: {
-        token: "5cf5a711-82cf-4d68-ae2e-3d784a6489fc",
-        subdomain: "tarasputin"
+        token: "ffbd52d8-baae-4aab-a297-3fcbd289bb80",
+        subdomain: "novacar"
     }
 }

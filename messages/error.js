@@ -2,11 +2,13 @@ class CustomError {
     constructor(code = 4000, data = null) {
         this.code = code;
         this.data = data;
-        this.message = errorList[code];
+        this.english = errorList[code];
+        this.type = 'custom error'
     }
 }
 
 const errorList = {
+    4000: 'Error',
     4001: 'No such user',
     4002: 'Invalid email',
     4003: 'Invalid access token',

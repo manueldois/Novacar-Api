@@ -2,10 +2,11 @@ class CustomSuccess {
     constructor(code = 2000, data = null) {
         this.code = code;
         this.data = data;
-        this.message = successList[code];
+        this.english = successList[code];
     }
 }
 const successList = {
+    2000: 'Success',
     2001: 'Email sent',
     2002: 'Welcome back',
     2003: 'Welcome to Novacar',
